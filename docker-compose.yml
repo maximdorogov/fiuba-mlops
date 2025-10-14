@@ -1,0 +1,110 @@
+services:
+  inference_api:
+    # restart: always
+    build:
+      context: .
+      dockerfile: ./inference_api/Dockerfile
+    ports:
+      - "8000:8000"
+
+  mlflow:
+    # restart: always
+    build:
+      context: .
+      dockerfile: ./mlflow/Dockerfile
+    container_name: mlflow
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - "5000:5000"
+    networks:
+      - frontend
+      - backend
+    environment:
+      - AWS_ACCESS_KEY_ID=root
+      - AWS_SECRET_ACCESS_KEY=12345678
+      - MLFLOW_S3_ENDPOINT_URL=http://s3:9000
+    command: >
+      mlflow server 
+      --backend-store-uri postgresql://airflow:airflow@postgres:5432/mlflow_db
+      --host 0.0.0.0
+      --default-artifact-root s3://mlflow/
+    healthcheck:
+      test: wget --no-verbose --tries=1 --spider http://mlflow:5000 || exit 1
+      interval: 60s
+      timeout: 10s
+      retries: 3
+
+  s3:
+    # restart: always
+    image: minio/minio:latest
+    container_name: minio
+    ports:
+      - "9010:9000"
+      - "9011:9001"
+    networks:
+      - frontend
+      - backend
+    environment:
+      - MINIO_ROOT_USER=root
+      - MINIO_ROOT_PASSWORD=12345678
+    volumes:
+      - minio_data:/data
+    command: server /data --console-address :9001
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+
+  create_s3_buckets:
+    image: minio/mc:latest
+    container_name: minio_create_bucket
+    depends_on:
+      - s3
+    networks:
+      - backend
+    entrypoint: >
+      /bin/sh -c '
+      sleep 5;
+      /usr/bin/mc alias set s3 http://s3:9000 root 12345678;
+      /usr/bin/mc mb s3/mlflow;
+      /usr/bin/mc mb s3/data;
+      exit 0;
+      '
+
+  postgres:
+    # restart: always
+    build:
+      context: .
+      dockerfile: ./postgres/Dockerfile
+    container_name: postgres
+    ports:
+      - "5432:5432"
+    networks:
+      - backend
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_DB=airflow
+      - POSTGRES_USER=airflow
+      - POSTGRES_PASSWORD=airflow
+      - POSTGRES_DATABASE=airflow
+      - POSTGRES_PORT=5432
+    volumes:
+      - db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD", "pg_isready", "-p", "5432", "-U", "airflow"]
+      interval: 60s
+      timeout: 20s
+      retries: 3
+
+networks:
+  frontend:
+    driver: bridge
+  backend:
+    driver: bridge
+
+volumes:
+  db_data:
+  minio_data:
