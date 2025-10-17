@@ -7,7 +7,7 @@ import os
 import pandas as pd
 
 # --- Configuration ---
-MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://minio:9000")
+MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://s3:9000")
 MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "csv-data")
 INCOMING_PREFIX = "incoming/"
 PROCESSED_PREFIX = "processed/"
@@ -46,8 +46,9 @@ def process_specific_csv_file(**context):
                 file_key = csv_files[0]  # Process the first CSV file found
                 print(f"Found CSV file to process: {file_key}")
             else:
-                print("No CSV files found in incoming folder")
-                return
+                print("✅ No CSV files found in incoming folder - nothing to process")
+                print("This is normal behavior when no new files are available")
+                return "No files to process"
         except Exception as e:
             print(f"Error listing files: {e}")
             return
@@ -101,14 +102,14 @@ with DAG(
 
     wait_for_new_csv = S3KeySensor(
         task_id="wait_for_new_csv",
-        bucket_key=f"{INCOMING_PREFIX}*.csv",  # Test with specific file first
+        bucket_key=f"{INCOMING_PREFIX}*.csv",  
         bucket_name=MINIO_BUCKET,
         wildcard_match=True,
-        poke_interval=10,  # Check every 10 seconds for files
-        timeout=100,      # Timeout after 100 seconds (less than 2 minutes)
-        mode='poke',      # Poke mode for regular checking
+        poke_interval=30,  # Check every 30 seconds for files  
+        timeout=90,       # Timeout after 90 seconds (less than 2 min schedule)
+        mode='reschedule', # Use reschedule mode (more efficient)
         aws_conn_id="minio_conn",
-        soft_fail=False,   # Fail if no file found so we can see the error
+        soft_fail=True,   # Don't fail the DAG run when no file found
     )
 
     process_csv_file = PythonOperator(

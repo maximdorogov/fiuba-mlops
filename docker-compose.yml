@@ -1,3 +1,29 @@
+x-airflow-common:
+  &airflow-common
+  image: apache/airflow:2.10.1
+  environment:
+    &airflow-common-env
+    PYTHONUNBUFFERED: 1
+    AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG
+    AIRFLOW__CORE__LOGGING_LEVEL: DEBUG
+    AIRFLOW__CORE__EXECUTOR: LocalExecutor
+    AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
+    AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
+    AIRFLOW__DATABASE__SQL_ALCHEMY_CONN: postgresql+psycopg2://airflow:airflow@postgres/airflow
+    AIRFLOW__API__AUTH_BACKEND: airflow.api.auth.backend.basic_auth
+    _PIP_ADDITIONAL_REQUIREMENTS: "apache-airflow-providers-amazon==9.2.0 boto3 pandas"
+    AWS_ACCESS_KEY_ID: root
+    AWS_SECRET_ACCESS_KEY: 12345678
+    MINIO_ENDPOINT: http://s3:9000
+    MINIO_BUCKET: csv-data
+  volumes:
+    - ./airflow/dags:/opt/airflow/dags
+    - ./airflow/requirements.txt:/requirements.txt
+  user: "${AIRFLOW_UID:-50000}:0"
+  depends_on:
+    - postgres
+    - s3
+
 services:
   inference_api:
     # restart: always
@@ -59,20 +85,6 @@ services:
       timeout: 20s
       retries: 3
 
-  create_s3_buckets:
-    image: minio/mc:latest
-    container_name: minio_create_bucket
-    depends_on:
-      - s3
-    entrypoint: >
-      /bin/sh -c '
-      sleep 5;
-      /usr/bin/mc alias set s3 http://s3:9000 root 12345678;
-      /usr/bin/mc mb s3/mlflow;
-      /usr/bin/mc mb s3/data;
-      exit 0;
-      '
-
   postgres:
     # restart: always
     build:
@@ -95,6 +107,67 @@ services:
       interval: 60s
       timeout: 20s
       retries: 3
+
+  webserver:
+    <<: *airflow-common
+    command: webserver
+    ports:
+      - "8080:8080"
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  scheduler:
+    <<: *airflow-common
+    command: scheduler
+    restart: always
+    depends_on:
+      airflow-init:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD-SHELL", "airflow jobs check --job-type SchedulerJob --hostname \"$${HOSTNAME}\""]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  airflow-init:
+    <<: *airflow-common
+    command: >
+      bash -c "airflow db migrate &&
+               (airflow users create --username admin --password admin --firstname Admin --lastname User --role Admin --email admin@example.com || echo 'User already exists') &&
+               (airflow connections add 'minio_conn' --conn-type 'aws' --conn-host 's3' --conn-port '9000' --conn-extra '{\"endpoint_url\": \"http://s3:9000\", \"aws_access_key_id\": \"root\", \"aws_secret_access_key\": \"12345678\"}' || echo 'Connection already exists') &&
+               echo 'Airflow initialization completed successfully'"
+    restart: no
+    depends_on:
+      postgres:
+        condition: service_healthy
+      s3:
+        condition: service_healthy
+
+
+  # runs once and exits to create the required S3 buckets
+  create_s3_buckets:
+    image: minio/mc:latest
+    container_name: minio_create_bucket
+    depends_on:
+      - s3
+    entrypoint: >
+      /bin/sh -c '
+      sleep 5;
+      /usr/bin/mc alias set s3 http://s3:9000 root 12345678;
+      /usr/bin/mc mb s3/mlflow;
+      /usr/bin/mc mb s3/data;
+      /usr/bin/mc mb s3/csv-data;
+      /usr/bin/mc mb s3/csv-data/incoming
+      /usr/bin/mc mb s3/csv-data/processed
+      exit 0;
+      '
 
 networks:
   default:
