@@ -1,11 +1,14 @@
 x-airflow-common:
   &airflow-common
-  image: apache/airflow:2.10.1
+  # image: apache/airflow:2.10.1
+  build:
+    context: .
+    dockerfile: ./airflow/Dockerfile
   environment:
     &airflow-common-env
     PYTHONUNBUFFERED: 1
-    AIRFLOW__LOGGING__LOGGING_LEVEL: DEBUG
-    AIRFLOW__CORE__LOGGING_LEVEL: DEBUG
+    AIRFLOW__LOGGING__LOGGING_LEVEL: WARNING
+    AIRFLOW__CORE__LOGGING_LEVEL: WARNING
     AIRFLOW__CORE__EXECUTOR: LocalExecutor
     AIRFLOW__CORE__LOAD_EXAMPLES: 'false'
     AIRFLOW__CORE__DAGS_ARE_PAUSED_AT_CREATION: 'false'
@@ -16,9 +19,9 @@ x-airflow-common:
     AWS_SECRET_ACCESS_KEY: 12345678
     MINIO_ENDPOINT: http://s3:9000
     MINIO_BUCKET: csv-data
-  volumes:
-    - ./airflow/dags:/opt/airflow/dags
-    - ./airflow/requirements.txt:/requirements.txt
+#  volumes:
+    # - ./airflow/dags:/opt/airflow/dags
+    # - ./airflow/requirements.txt:/requirements.txt
   user: "${AIRFLOW_UID:-50000}:0"
   depends_on:
     - postgres
@@ -164,8 +167,8 @@ services:
       /usr/bin/mc mb s3/mlflow;
       /usr/bin/mc mb s3/data;
       /usr/bin/mc mb s3/csv-data;
-      /usr/bin/mc mb s3/csv-data/incoming
-      /usr/bin/mc mb s3/csv-data/processed
+      /usr/bin/mc mb s3/csv-data/incoming;
+      /usr/bin/mc mb s3/csv-data/processed;
       exit 0;
       '
 
