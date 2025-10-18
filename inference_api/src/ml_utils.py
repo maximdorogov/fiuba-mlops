@@ -8,6 +8,18 @@ from .constants import MLFLOW_TRACKING_URI
 def load_model_by_alias(model_name: str, alias: str = "champion"):
     """
     Load model from MLflow registry using model name and alias
+
+    Parameters
+    ----------
+    model_name: str
+        The name of the registered model in MLflow.
+    alias: str
+        The alias of the model version to load (e.g., 'champion', 'latest', etc.).
+    
+    Returns
+    -------
+    model: Any
+        The loaded model or None if loading failed.
     """
     try:
         mlflow.set_tracking_uri(MLFLOW_TRACKING_URI)

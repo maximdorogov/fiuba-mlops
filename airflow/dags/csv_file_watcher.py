@@ -6,11 +6,34 @@ import boto3
 import os
 import pandas as pd
 
-# --- Configuration ---
+
 MINIO_ENDPOINT = os.environ.get("MINIO_ENDPOINT", "http://s3:9000")
 MINIO_BUCKET = os.environ.get("MINIO_BUCKET", "csv-data")
 INCOMING_PREFIX = "incoming/"
 PROCESSED_PREFIX = "processed/"
+
+def clean_data(df: pd.DataFrame, expected_columns: set) -> pd.DataFrame:
+    """
+    Clean the input DataFrame by removing NaNs and keeping only expected 
+    columns.
+
+    Parameters
+    ----------
+    df: pd.DataFrame
+        The input DataFrame to clean.
+    expected_columns: set
+        A set of expected column names to retain in the DataFrame.
+
+    Returns
+    -------
+    pd.DataFrame
+        The cleaned DataFrame.
+    """
+
+    df.dropna(inplace=True)
+    if len(expected_columns) != 0:
+        df = df[[col for col in df.columns if col in expected_columns]]
+    return df
 
 
 def process_specific_csv_file(**context):
@@ -64,8 +87,35 @@ def process_specific_csv_file(**context):
 
         # Process the CSV
         df = pd.read_csv(tmp_path)
-        print(f"✅ Processed {len(df)} rows from {filename}")
-        print(df.head())
+        df = clean_data(
+            df,
+            expected_columns={
+                'airtemperature_k', 
+                'process_temperature_k', 
+                'rotational_speed_rpm', 
+                'torque_nm', 
+                'tool_wear_min', 
+                'type_l', 
+                'type_m', 
+                'target'
+            })
+
+        df.to_csv(tmp_path, index=False)
+        print(f"✅ Processed CSV saved to: {tmp_path}")
+
+        # Upload the processed file back to MinIO
+        print(f"📤 Uploading processed file to: {PROCESSED_PREFIX}{filename}")
+        s3.upload_file(tmp_path, MINIO_BUCKET, f"{PROCESSED_PREFIX}{filename}")
+        print(f"✅ Uploaded processed file to: {PROCESSED_PREFIX}{filename}")
+
+        # delete the temporary local file
+        os.remove(tmp_path)
+        print(f"🧹 Removed temporary file: {tmp_path}")
+
+        # delete the original file from incoming/
+        print(f"🗑 Deleting original file from incoming/: {file_key}")
+        s3.delete_object(Bucket=MINIO_BUCKET, Key=file_key)
+        print(f"✅ Deleted original file: {file_key}")
 
         # Move file to processed/
         new_key = f"{PROCESSED_PREFIX}{filename}"
@@ -116,5 +166,5 @@ with DAG(
         task_id="process_csv_file",
         python_callable=process_specific_csv_file,
     )
-
+    # Tell dag to run processing after file detection
     wait_for_new_csv >> process_csv_file

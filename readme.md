@@ -2,7 +2,7 @@
 
 ### Alumno: Maxim Dorogov
 
-referencia: https://github.com/facundolucianna/amq2-service-ml/
+Proyecto de referencia: https://github.com/facundolucianna/amq2-service-ml/
 
 
 ## Descripcion del proyecto
@@ -26,7 +26,7 @@ Notebook Jupyter (`notebooks/experiment.ipynb`) para experimentación con modelo
 
 ### **inference_api/**
 
-La api fue desarrollada con FastAPI y esta compuesta por un endpoint de inferencia para predicción de fallas en máquinas y un endpoint de health check. Durante el proceso de inicialización, se intenta cargar el modelo "champion" desde el MLflow Model Registry. Si la conexión falla, o el modelo es inexistente, utiliza un modelo local como respaldo.
+La api fue desarrollada con FastAPI y esta compuesta por un endpoint de inferencia para predicción de fallas en máquinas y un endpoint de health check. Durante el proceso de inicialización, se intenta cargar el modelo "champion" desde el MLflow Model Registry. Si la conexión falla, o el modelo es inexistente, utiliza un modelo local, incluido en la imagen de docker, como respaldo.
 
 ### Endpoints
 
@@ -93,7 +93,7 @@ ac2e2426001f   minio/minio:latest          "/usr/bin/docker-ent…"   28 hours a
 
 ## Acceso a los servicios
 
-- **API de inferencia (documentacion): http://localhost:8000/docs**
+- **API de inferencia (documentacion swagger): http://localhost:8000/docs**
 
 Desde la documentacion se puede probar el endpoint de inferencia `/predict` enviando un JSON con las caracteristicas de la maquina. 
 
@@ -112,11 +112,30 @@ En el panel de Airflow, se puede monitorear el DAG `csv_file_watcher` y su ejecu
 
 ![Airflow DAG](images/dags.png)
 
-- MLflow Tracking UI: http://localhost:5000
+- **MLflow Tracking UI: http://localhost:5000**
 
-- MinIO Web UI: http://localhost:9010 
+Durante las pruebas se entreno un modelo desde `notebooks/experiment.ipynb` y se registro un experimento de busqueda de hiperparametros para un clasificador SVM:
+
+![mlflow_exp](images/experiment.png)
+
+Tambien se almaceno el modelo entrenado para dejarlo accesible desde la API de inferencia:
+
+![mlflow_model](images/champion.png)
+
+Para probar el funcionamiento de MlFlow se puede ejecutar la jupyter notebook que se encuentra en `notebooks/experiment.ipynb`. Esto entrena un modelo y registra, tanto el modelo como los hiperparametros junto con metricas de entrenamiento, en el servidor de MlFlow. Luego de esto es necesario reiniciar el servicio de `inference_api` para que el modelo este disponible en el endpoint de inferencia:
+
+```sh
+docker compose restart inference_api
+```
+>NOTA: Se recomienda instalar los requirements de `inference_api/requirements.txt` en la computadora donde tengan alojado su jupyter server para evitar tener problemas de incompatibilidad.
+
+- **MinIO Web UI: http://localhost:9010**
     - Usuario: `admin`
     - Contraseña: `12345678`
+
+En el panel de administracion de MinIO se veran los buckets creados y los datos almacenados. Para probar el funcionamiento del DAG se puede subir un archivo CSV manualmente a `csv-data/incoming/` y al cabo de unos minutos lo vera procesado en `csv-data/processed`
+
+![MinIO Buckets](images/minio.png)
 
 >NOTA: Las credenciales de acceso a los servicios son para fines de desarrollo y pruebas. En un entorno de producción, se deben utilizar credenciales seguras y mecanismos de autenticación adecuados.
 
@@ -126,3 +145,5 @@ Algunas posibles mejoras para el proyecto:
 - Implementar un endpoint de actualización del modelo en la API de inferencia para permitir la carga dinámica de nuevos modelos desde MLflow.
 - DAG para entrenamiento de modelos y registro del modelo `champion` en MLflow ante la llegada de nuevos datos.
 - Autenticacion mediante OAuth2 o JWT para la API de inferencia.
+- Parametrizar el DAG de airflow (file watcher) para permitir la configuracion dinamica de buckets y prefijos.
+- Mantener las imagenes creadas en un registry versionando cada build y referenciando la url en el archivo de compose en la etapa de deployment.
